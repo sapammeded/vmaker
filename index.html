@@ -69,9 +69,18 @@ async function agnesSubmit(job){
  const payload={model,prompt:job.prompt,seconds:job.duration||5,size:'720P',aspect_ratio:job.ratio||'16:9',n:1};
  if(refs.length){payload.mode='reference';payload.images=refs.map(x=>x.data_url)}
  else payload.mode='text';
- const r=await fetch('https://apihub.agnes-ai.com/v1/videos',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(payload)});
- let d={};try{d=await r.json()}catch{}
- if(!r.ok)throw Error(d.error?.message||d.message||'Agnes HTTP '+r.status);
+ let r,d={};
+ for(let attempt=1;attempt<=15;attempt++){
+   r=await fetch('https://apihub.agnes-ai.com/v1/videos',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+   d={};try{d=await r.json()}catch{}
+   const msg=String(d.error?.message||d.message||'').toLowerCase();
+   if(r.ok)break;
+   const full=r.status===503 || msg.includes('queue is full') || msg.includes('video_queue_full');
+   if(!full)throw Error(d.error?.message||d.message||'Agnes HTTP '+r.status);
+   if(attempt===15)throw Error('Antrian Agnes Video 2.5 Flash masih penuh setelah 15 percobaan. Coba lagi beberapa menit lagi.');
+   $('movieStatus').textContent='⏳ Agnes queue penuh • retry '+attempt+'/15 • menunggu 30 detik...';
+   await new Promise(x=>setTimeout(x,30000));
+ }
  const vid=d.video_id||d.id||d.video?.id||d.task_id;
  if(!vid)throw Error('Agnes tidak mengembalikan video_id.');
  return {video_id:vid,model,raw:d};
@@ -95,8 +104,17 @@ $('testFree').onclick=()=>runBusy($('testFree'),async()=>{
  if(!key){$('freeStatus').textContent='❌ Masukkan Free Agnes API key dulu.';return}
  try{
    $('freeStatus').textContent='⏳ Menguji koneksi Free Engine...';
-   const r=await fetch('https://apihub.agnes-ai.com/v1/videos',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:'agnes-video-2.5-flash',prompt:'A cinematic test shot, realistic camera movement, no dialogue',mode:'text',seconds:'5',size:'720P',aspect_ratio:'16:9',n:1})});
-   const d=await r.json(); if(!r.ok)throw Error(d.error?.message||d.message||'HTTP '+r.status);
+   let r,d={};
+   for(let attempt=1;attempt<=15;attempt++){
+     r=await fetch('https://apihub.agnes-ai.com/v1/videos',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:'agnes-video-2.5-flash',prompt:'A cinematic test shot, realistic camera movement, no dialogue',mode:'text',seconds:'5',size:'720P',aspect_ratio:'16:9',n:1})});
+     d=await r.json().catch(()=>({}));
+     const msg=String(d.error?.message||d.message||'').toLowerCase();
+     if(r.ok)break;
+     if(!(r.status===503||msg.includes('queue is full')||msg.includes('video_queue_full')))throw Error(d.error?.message||d.message||'HTTP '+r.status);
+     $('freeStatus').textContent='⏳ Agnes queue penuh • retry '+attempt+'/15 • menunggu 30 detik...';
+     if(attempt===15)throw Error('Queue Agnes masih penuh setelah 15 percobaan.');
+     await new Promise(x=>setTimeout(x,30000));
+   }
    $('freeStatus').textContent='✅ FREE ENGINE CONNECTED • video_id '+(d.video_id||d.id||'received');
   }catch(e){$('freeStatus').textContent='❌ '+e.message}
 });
